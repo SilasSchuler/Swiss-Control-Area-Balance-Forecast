@@ -1,0 +1,122 @@
+services:
+  postgres:
+    image: postgres:18.6-bookworm
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres_data:/var/lib/postgresql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - development
+
+  objectstorage:
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z 
+    # See: https://jacar.es/en/fix-pull-access-denied-minio-docker/
+    ports:
+      - "127.0.0.1:9000:9000"
+    command: server --address "0.0.0.0:9000" /data
+    hostname: objectstorage
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ADMIN}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET}
+    volumes:
+      - ./data/s3_data:/data
+    networks:
+      - development
+
+  mlflow:
+    build: ./containers/mlflow
+    image: swissgrid-mlflow:local
+    command: >
+      mlflow server --host 0.0.0.0 --port 5001
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      --artifacts-destination s3://artifacts
+    ports:
+      - 127.0.0.1:5001:5001 # 5000 (mlflow default port) is taken by airplay on macos
+    depends_on:
+      postgres:
+        condition: service_healthy
+      objectstorage-init:
+        condition: service_completed_successfully
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ADMIN}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET}
+      - MLFLOW_S3_ENDPOINT_URL=http://objectstorage:9000
+    networks:
+      - development
+
+  objectstorage-init:
+    build: ./containers/mlflow
+    image: swissgrid-mlflow:local
+    depends_on:
+      - objectstorage
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ADMIN}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET}
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import boto3, time
+        s3 = boto3.client("s3", endpoint_url="http://objectstorage:9000")
+        for _ in range(30):
+          try:
+              for b in ("artifacts", "raw", "features"):
+                  try:
+                      s3.create_bucket(Bucket=b)
+                  except s3.exceptions.BucketAlreadyOwnedByYou:
+                      pass
+              break
+          except Exception:
+              time.sleep(2)
+        else:
+          raise SystemExit("object storage not reachable")
+    networks:
+      - development
+
+
+  pgadmin:
+    image: dpage/pgadmin4:9.17
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-8085}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - development
+
+  pipeline:
+    build: .
+    env_file: .env
+    environment:  # overrides localhost values from .env
+      POSTGRES_HOST: postgres
+      S3_ENDPOINT_URL: http://objectstorage:9000
+    profiles: ["pipeline"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      objectstorage-init:
+        condition: service_completed_successfully
+    networks:
+      - development
+
+
+networks:
+  development:
+volumes:
+  pgadmin_data:

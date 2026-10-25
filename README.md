@@ -68,6 +68,15 @@ docker compose up -d
 docker compose down
 ```
 
+## Ingestion
+
+```
+uv run python -m src.ingestion.energy_balance backfill    # all history from Swissgrid Energy Balance
+uv run python -m src.ingestion.energy_balance daily       # today's energy balance
+
+```
+
+
 ### Servers
 | Server | url |
 |---|---|

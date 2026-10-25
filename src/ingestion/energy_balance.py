@@ -20,8 +20,10 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import re
 import sys
 from datetime import date
+from datetime import datetime, timezone
 
 import requests
 from bs4 import BeautifulSoup
@@ -65,16 +67,21 @@ def discover_urls() -> dict[str, str]:
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
 
-    found_url = {}
-    for a in soup.find_all("a", href=True):
-        for key, filename in WANTED.items():
-            if filename in a["href"]:
-                found_url[key] = urljoin(PAGE_URL, a["href"])
 
-    missing = WANTED.keys() - found_url.keys()
-    if missing:
-        raise RuntimeError(f"Links not found: {missing}; page layout changed?")
-    return found_url
+    YEARLY = re.compile(r"control-area-balance-(\d{4})\.csv")
+    MIN_YEAR = 2024
+
+    found = {}
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "control-area-balance-daily.csv" in href:
+            found["daily"] = urljoin(PAGE_URL, href)
+        elif (m := YEARLY.search(href)) and int(m.group(1)) >= MIN_YEAR:
+            found[m.group(1)] = urljoin(PAGE_URL, href)
+    if "daily" not in found or len(found) < 2:
+        raise RuntimeError(f"Links missing, got {sorted(found)}; page layout changed?")
+    
+    return found
 
 
 def fetch_file(url: str) -> bytes:
@@ -106,33 +113,37 @@ def run_checks(rows: list[dict]) -> str:
 
 def load_file(key: str, url: str, mode: str) -> None:
     """Land one file in MinIO + Postgres. Raises on hard errors."""
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
+    source_key = f"daily-{today.isoformat()}" if key == "daily" else key
     raw_bytes = fetch_file(url)
     source_file = url.rsplit("/", 1)[-1]
 
     s3 = get_client()
     ensure_bucket(s3)
-    upload_bytes(s3, minio_key(key, today), raw_bytes)
+    upload_bytes(s3, minio_key(source_key, today), raw_bytes)
 
-    rows = parse_rows(raw_bytes)  # hard fail if unparseable
+    rows = parse_rows(raw_bytes)
     if not rows:
         raise ValueError(f"{source_file} contains zero rows")
 
     conn = get_conn()
-    # Raw Tables. 
-    ensure_schema(conn)
-    
     try:
+        ensure_schema(conn)
         with conn.cursor() as cur:
             cur.execute(DDL)
         conn.commit()
         with IngestionRun(conn, SOURCE, mode, snapshot_date=today) as run:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM raw.control_area_balance WHERE source_key = %s",(key,),)
-                execute_values(cur,
+                cur.execute(
+                    "DELETE FROM raw.control_area_balance WHERE source_key = %s",
+                    (source_key,),
+                )
+                execute_values(
+                    cur,
                     "INSERT INTO raw.control_area_balance "
                     "(source_key, source_file, payload) VALUES %s",
-                    [(key, source_file, Json(r)) for r in rows], page_size=1000,
+                    [(source_key, source_file, Json(r)) for r in rows],
+                    page_size=1000,
                 )
             conn.commit()
             run.rows_loaded = len(rows)

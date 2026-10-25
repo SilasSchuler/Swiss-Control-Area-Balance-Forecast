@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import traceback
-from datetime import date
+from datetime import date, datetime, timezone
 from types import TracebackType
 
 import psycopg2
@@ -12,6 +12,9 @@ from psycopg2.extensions import connection
 from .config import SETTINGS
 
 DDL = """    
+CREATE SCHEMA IF NOT EXISTS raw;
+CREATE SCHEMA IF NOT EXISTS staging;
+
 CREATE TABLE IF NOT EXISTS raw.ingestion_log (
     id            BIGSERIAL PRIMARY KEY,
     source        TEXT        NOT NULL,
@@ -24,11 +27,6 @@ CREATE TABLE IF NOT EXISTS raw.ingestion_log (
     message       TEXT
 );
 
-CREATE TABLE IF NOT EXISTS raw.source_versions (
-    source       TEXT PRIMARY KEY,
-    content_hash TEXT        NOT NULL,
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 """
 
 
@@ -50,30 +48,6 @@ def ensure_schema(conn: connection) -> None:
     conn.commit()
 
 
-def get_source_hash(conn: connection, source: str) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT content_hash FROM raw.source_versions WHERE source = %s",
-            (source,),
-        )
-        row = cur.fetchone()
-    return row[0] if row else None
-
-
-def set_source_hash(conn: connection, source: str, content_hash: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO raw.source_versions (source, content_hash, updated_at)
-            VALUES (%s, %s, now())
-            ON CONFLICT (source)
-            DO UPDATE SET content_hash = EXCLUDED.content_hash,
-                          updated_at   = EXCLUDED.updated_at
-            """,
-            (source, content_hash),
-        )
-    conn.commit()
-
 
 class IngestionRun:
     """Context manager that records one pipeline run in raw.ingestion_log.
@@ -90,7 +64,7 @@ class IngestionRun:
         self.conn = conn
         self.source = source
         self.mode = mode
-        self.snapshot_date = snapshot_date
+        self.snapshot_date = datetime.now(timezone.utc).date()
         self.rows_loaded: int | None = None
         self.message: str | None = None
         self._log_id: int | None = None
@@ -112,6 +86,8 @@ class IngestionRun:
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None,) -> bool:
+        if exc_type is not None:
+            self.conn.rollback()
         status = "success" if exc_type is None else "failed"
         message = self.message
         if exc_val is not None:

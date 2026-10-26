@@ -1,0 +1,48 @@
+# .github/workflows/daily-batch.yml
+name: daily_ingest_batch
+
+on:
+  schedule: [{ cron: "7 23 * * *" }]   # 23:07 UTC
+  workflow_dispatch:                                  # manual "Run workflow" button
+permissions: { contents: read }        # no cloud, so no id-token
+
+env:
+  POSTGRES_HOST: localhost             # scripts run on the VM, outside Docker
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ci
+  POSTGRES_USER: ci
+  POSTGRES_PASSWORD: ci-only           # throwaway container, not a secret
+  MINIO_ADMIN: ci
+  MINIO_SECRET: ci-only+1
+  MINIO_ENDPOINT: http://localhost:9000
+
+jobs:
+  batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4      # copy of repo
+      - uses: astral-sh/setup-uv@v5    # install uv
+      # 1 · test
+      - run: uv sync --locked && uv run python -m pytest tests -q
+      
+      # 2 · start containers
+      - run: |
+          printenv | grep -E '^(POSTGRES|MINIO)_' > .env
+          docker compose up -d postgres objectstorage objectstorage-init
+          until docker compose exec -T postgres pg_isready; do sleep 2; done
+          
+      # 3 + 4 · ingest and transform
+      - run: uv run python -m src.ingestion.energy_balance all
+      - run: uv run python -m src.ingestion.transform_features
+      
+      # 5 · smoke test the features
+      - run: |
+          docker compose exec -T postgres sh -c \
+            'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c \
+            "SELECT max(ts_utc) > now() - interval '"'"'3 hours'"'"' FROM features.control_area_features"' \
+            | grep -qx t
+            
+      # 6 · stop containers, even after a failure
+      - if: always()
+        run: docker compose down -v

@@ -14,7 +14,8 @@ env:
   POSTGRES_PASSWORD: ci-only           # throwaway container, not a secret
   MINIO_ADMIN: ci
   MINIO_SECRET: ci-only+1
-  MINIO_ENDPOINT: http://localhost:9000
+  MINIO_ENDPOINT: http://localhost:9000  # maybe obselete here
+  S3_ENDPOINT_URL: http://localhost:9000
 
 jobs:
   batch:
@@ -27,10 +28,12 @@ jobs:
       - run: uv sync --locked && uv run python -m pytest tests -q
       
       # 2 · start containers
+          
       - run: |
-          printenv | grep -E '^(POSTGRES|MINIO)_' > .env
+          printenv | grep -E '^(POSTGRES|MINIO|S3)_' > .env                  # Make sure no secrets checked in; 
           docker compose up -d postgres objectstorage objectstorage-init
           until docker compose exec -T postgres pg_isready; do sleep 2; done
+          test "$(docker wait "$(docker compose ps -aq objectstorage-init)")" = 0    # init container retries until MinIO answers, then creates the buckets
           
       # 3 + 4 · ingest and transform
       - run: uv run python -m src.ingestion.energy_balance all
@@ -42,6 +45,10 @@ jobs:
             'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c \
             "SELECT max(ts_utc) > now() - interval '"'"'3 hours'"'"' FROM features.control_area_features"' \
             | grep -qx t
+
+      # debug · container state and logs on failure
+      - if: failure()
+        run: docker compose ps -a && docker compose logs --tail=50
             
       # 6 · stop containers, even after a failure
       - if: always()

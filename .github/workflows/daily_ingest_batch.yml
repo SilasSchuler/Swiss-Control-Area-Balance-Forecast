@@ -12,7 +12,7 @@ env:
   POSTGRES_DB: ci
   POSTGRES_USER: ci
   POSTGRES_PASSWORD: ci-only           # throwaway container, not a secret
-  MINIO_ADMIN: ci
+  MINIO_ADMIN: ciadmin
   MINIO_SECRET: ci-only+1
   MINIO_ENDPOINT: http://localhost:9000  # maybe obselete here
   S3_ENDPOINT_URL: http://localhost:9000
@@ -32,7 +32,7 @@ jobs:
       - run: |
           printenv | grep -E '^(POSTGRES|MINIO|S3)_' > .env                  # Make sure no secrets checked in; 
           docker compose up -d postgres objectstorage objectstorage-init
-          until docker compose exec -T postgres pg_isready; do sleep 2; done
+          until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 2; done
           test "$(docker wait "$(docker compose ps -aq objectstorage-init)")" = 0    # init container retries until MinIO answers, then creates the buckets
           
       # 3 + 4 · ingest and transform

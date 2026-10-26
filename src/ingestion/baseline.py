@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .transform_energy_balance import LAGS
+from .transform_features import LAGS
 
 TEST_START = "2026-07-01"  # everything before = training period, from here = test
 

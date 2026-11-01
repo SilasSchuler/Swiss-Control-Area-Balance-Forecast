@@ -1,8 +1,8 @@
-"""Tests for transform.py. Change the import below to your package name."""
+"""Tests for transform.py."""
 
 import pandas as pd
 
-from src.ingestion.transform_features import LAGS, MIN_LAG, build_clean, build_features
+from src.ingestion.transform import LAGS, MIN_LAG, build_clean, build_features
 
 LOADED = pd.Timestamp("2026-10-25 12:00", tz="UTC")
 

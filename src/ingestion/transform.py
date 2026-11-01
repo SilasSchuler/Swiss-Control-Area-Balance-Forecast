@@ -20,7 +20,13 @@ import pandas as pd
 LOCAL_TZ = "Europe/Zurich"
 FREQ = "15min"
 
-MIN_LAG = 100          # quarter-hours, see module docstring
+
+ISSUE_TIME_UTC = "23:20"       # forecast issued on day D at this time
+LAST_KNOWN_UTC = "22:45"       # newest quarter-hour published by then
+HORIZON_STEPS = 96             # all of D+1
+MIN_LAG = HORIZON_STEPS + 4    # 22:45 -> 23:45 is 4 steps, so 100
+
+
 LAGS = (192, 672)      # 2 days and 7 days, both >= MIN_LAG
 
 # Column names differ between the yearly files, pick the first one present.

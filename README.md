@@ -1,7 +1,7 @@
 # Swiss-Control-Area-Balance-Forecast
 HSLU H26 Machine Learning Operations Project.
 
-The task is to build a complete data ingestion pipeline to train a machine learning model. Everything has to be built to withstand a producitve system on the cloud.
+The task is to build a complete data ingestion pipeline to train a machine learning model. Everything has to be built to withstand a productive system on the cloud.
 
 
 
@@ -21,6 +21,7 @@ Issue time: every night at T = 23:20 UTC on day D, one forecast for all 96
 quarter-hours of D+1 (non-recursive). Only values published before T are used.
 
 Success criterion: MAE = (1/N) * sum(|y_hat_t - y_t|) over 15-min steps.
+Live MAE is scored against first-published values (the daily snapshot). A second figure against corrected values follows after the six-month revision window.
 
 Baseline: persistence with a lag that exists at issue time. A lag of one day
 (t-96) is not available for the last steps of D+1, so the baselines are
@@ -51,11 +52,11 @@ Not used: lags t-1 to t-4 and all other short lags.
 
 ## Data
 
-- **Swissgrid Energy Balance Data:** Dataset of control area balance, activated secondary energies and tertiery energies, and international cooperation IGCC. All leading to total system imbalance and the balancing energy price. All values are quarter hourly.
+- **Swissgrid Energy Balance Data:** Dataset of control area balance, activated secondary energies and tertiary energies, and international cooperation IGCC. All leading to total system imbalance and the balancing energy price. All values are quarter hourly.
   - **Source:** [Swissgrid Energy Data](https://www.swissgrid.ch/en/home/customers/topics/energy-data-ch.html)
 
 - **Volume:** 69,463 quarter-hours since 01.11.2024 (Zurich time), growing by 96 rows per day.
-- **Access:** the pipeline reads the download links from the Swissgrid energy data page, so a changed file URL does not break it. Terms of use: Non-binding data offer not falling under copyright. Since information is intended for general information purposes only, there is no gurantee as to the correctness or accessibility. 
+- **Access:** the pipeline reads the download links from the Swissgrid energy data page, so a changed file URL does not break it. Terms of use: Non-binding data offer not falling under copyright. Since information is intended for general information purposes only, there is no guarantee as to the correctness or accessibility. 
 - **Fallback:** ENTSO-E imbalance data (not implemented yet).
 
 ## Architecture
@@ -129,10 +130,9 @@ uv run python -m src.ingestion.energy_balance daily       # today's energy balan
 ## Transformation
 
 ```
-uv run python -m src.ingestion.transform_features
+uv run python -m src.ingestion.transform
 
 ```
-
 
 ### Servers
 | Server | url |
@@ -172,7 +172,7 @@ All docs are in the docs. Folder.
 
 ## M2 Feature Pipeline
 
-Due: 29.10.2026
+Due: 05.11.2026
 
 **Deliverable** — working feature pipeline:
 1.  Automated data ingestion from a live source (+backfill)

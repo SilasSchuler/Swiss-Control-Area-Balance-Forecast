@@ -37,7 +37,7 @@ jobs:
           
       # 3 + 4 · ingest and transform
       - run: uv run python -m src.ingestion.energy_balance all
-      - run: uv run python -m src.ingestion.transform_features
+      - run: uv run python -m src.ingestion.transform
       
       # 5 · smoke test the features
       - run: |

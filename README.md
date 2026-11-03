@@ -4,7 +4,6 @@ HSLU H26 Machine Learning Operations Project.
 The task is to build a complete data ingestion pipeline to train a machine learning model. Everything has to be built to withstand a productive system on the cloud.
 
 
-
 ## Use Case
 
 A modern problem of electric grids is no longer the production, which has countless options
@@ -61,7 +60,7 @@ Not used: lags t-1 to t-4 and all other short lags.
 
 ## Architecture
 
-*To be added*
+![Architecture M2](attachments/Architecture_M2.png)
 
 # Setup
 
@@ -131,7 +130,6 @@ uv run python -m src.ingestion.energy_balance daily       # today's energy balan
 
 ```
 uv run python -m src.ingestion.transform
-
 ```
 
 ### Servers

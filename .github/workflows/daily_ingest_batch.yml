@@ -1,7 +1,7 @@
 name: daily_ingest_batch
 
+# Called by Cron-Job.org consistently at 23.07
 on:
-  schedule: [{ cron: "7 23 * * *" }]   # 23:07 UTC, before issue time 23:20
   workflow_dispatch:                   # manual "Run workflow" button
   pull_request:
     branches: [main]

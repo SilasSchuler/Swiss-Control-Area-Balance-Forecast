@@ -3,6 +3,13 @@ name: daily_ingest_batch
 on:
   schedule: [{ cron: "7 23 * * *" }]   # 23:07 UTC, before issue time 23:20
   workflow_dispatch:                   # manual "Run workflow" button
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: swgr-pipeline                 # a PR run and the nightly run never write at the same time
+  cancel-in-progress: false
+
 
 permissions:
   contents: read

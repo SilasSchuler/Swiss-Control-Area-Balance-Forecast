@@ -1,55 +1,52 @@
-# .github/workflows/daily-batch.yml
 name: daily_ingest_batch
 
 on:
-  schedule: [{ cron: "7 23 * * *" }]   # 23:07 UTC
-  workflow_dispatch:                                  # manual "Run workflow" button
-permissions: { contents: read }        # no cloud, so no id-token
+  schedule: [{ cron: "7 23 * * *" }]   # 23:07 UTC, before issue time 23:20
+  workflow_dispatch:                   # manual "Run workflow" button
+
+permissions:
+  contents: read
+  id-token: write                      # OIDC token for Workload Identity Federation
 
 env:
-  POSTGRES_HOST: localhost             # scripts run on the VM, outside Docker
+  STORAGE_BACKEND: gcs
+  GCS_BUCKET: ${{ vars.GCS_BUCKET }}
+  POSTGRES_HOST: 127.0.0.1             # Cloud SQL Auth Proxy, started in step 3
   POSTGRES_PORT: "5432"
-  POSTGRES_DB: ci
-  POSTGRES_USER: ci
-  POSTGRES_PASSWORD: ci-only           # throwaway container, not a secret
-  MINIO_ADMIN: ciadmin
-  MINIO_SECRET: ci-only+1
-  MINIO_ENDPOINT: http://localhost:9000  # maybe obselete here
-  S3_ENDPOINT_URL: http://localhost:9000
+  POSTGRES_DB: swgr
+  POSTGRES_USER: sharedUser
+  POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
 
 jobs:
   batch:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4      # copy of repo
-      - uses: astral-sh/setup-uv@v5    # install uv
-      # 1 · test
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      # 1 · unit tests, no cloud access needed
       - run: uv sync --locked && uv run python -m pytest tests -q
-      
-      # 2 · start containers
-          
+
+      # 2 · sign in to GCP without a stored key
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_EMAIL }}
+
+      # 3 · tunnel to Cloud SQL on 127.0.0.1:5432 (runs until the job ends)
       - run: |
-          printenv | grep -E '^(POSTGRES|MINIO|S3)_' > .env                  # Make sure no secrets checked in; 
-          docker compose up -d postgres objectstorage objectstorage-init
-          until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 2; done
-          test "$(docker wait "$(docker compose ps -aq objectstorage-init)")" = 0    # init container retries until MinIO answers, then creates the buckets
-          
-      # 3 + 4 · ingest and transform
+          curl -sSfLo cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.26.2/cloud-sql-proxy.linux.amd64
+          chmod +x cloud-sql-proxy
+          ./cloud-sql-proxy --port 5432 "${{ vars.CLOUDSQL_INSTANCE }}" &
+          timeout 60 bash -c 'until pg_isready -h 127.0.0.1 -p 5432; do sleep 2; done'
+
+      # 4 + 5 · ingest (raw CSV to GCS, rows to Cloud SQL) and transform
       - run: uv run python -m src.ingestion.energy_balance all
       - run: uv run python -m src.ingestion.transform
-      
-      # 5 · smoke test the features
-      - run: |
-          docker compose exec -T postgres sh -c \
-            'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c \
-            "SELECT max(ts_utc) > now() - interval '"'"'3 hours'"'"' FROM features.control_area_features"' \
-            | grep -qx t
 
-      # debug · container state and logs on failure
-      - if: failure()
-        run: docker compose ps -a && docker compose logs --tail=50
-            
-      # 6 · stop containers, even after a failure
-      - if: always()
-        run: docker compose down -v
+      # 6 · smoke test: features reach the last 3 hours
+      - run: |
+          PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c \
+            "SELECT max(ts_utc) > now() - interval '3 hours' FROM features.control_area_features" \
+            | grep -qx t

@@ -1,5 +1,7 @@
 # No data in repo
 data/*
+.claude/*
+.idea/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

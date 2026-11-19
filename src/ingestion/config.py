@@ -34,6 +34,8 @@ class Settings:
     minio_endpoint: str = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
     minio_admin: str = os.getenv("MINIO_ADMIN", "minioadmin")
     minio_secret: str = os.getenv("MINIO_SECRET", "")
+    storage_backend: str = os.getenv("STORAGE_BACKEND", "minio")  # minio | gcs
+    gcs_bucket: str = os.getenv("GCS_BUCKET", "")
     swgr_url_raw: str = os.getenv("SWGR_URL_RAW", "https://www.swissgrid.ch/en/home/customers/topics/energy-data-ch.html")
 
 
